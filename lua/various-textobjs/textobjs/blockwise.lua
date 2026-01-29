@@ -2,6 +2,66 @@ local M = {}
 local u = require("various-textobjs.utils")
 --------------------------------------------------------------------------------
 
+---@param lineNr number
+---@return boolean
+local function isBlankLine(lineNr)
+	local lastLine = vim.api.nvim_buf_line_count(0)
+	if lineNr > lastLine or lineNr < 1 then return true end
+	local lineContent = u.getline(lineNr)
+	return lineContent:find("^%s*$") ~= nil
+end
+
+---@param startLnum integer
+---@param endLnum integer
+local function setLinewiseSelection(startLnum, endLnum)
+	u.saveJumpToJumplist()
+	vim.api.nvim_win_set_cursor(0, { startLnum, 0 })
+	if vim.fn.mode() ~= "V" then u.normal("V") end
+	u.normal("o")
+	vim.api.nvim_win_set_cursor(0, { endLnum, 0 })
+end
+
+---Contiguous non-blank lines, optionally restricted by indentation
+---@param scope "inner"|"outer" inner: same indent only, outer: all contiguous non-blank lines
+function M.block(scope)
+	local curLnum = vim.api.nvim_win_get_cursor(0)[1]
+	local lastLine = vim.api.nvim_buf_line_count(0)
+
+	-- Get indent level, handling blank lines specially
+	-- (vim.fn.indent returns 0 for whitespace-only lines)
+	local startIndent
+	if isBlankLine(curLnum) then
+		local whitespace = u.getline(curLnum):match("^[ \t]*") or ""
+		if #whitespace == 0 then
+			setLinewiseSelection(curLnum, curLnum)
+			return
+		end
+		startIndent = vim.fn.strdisplaywidth(whitespace)
+	else
+		startIndent = vim.fn.indent(curLnum)
+	end
+
+	local function isBlockBoundary(lnum)
+		if isBlankLine(lnum) then return true end
+		if scope == "outer" then return false end
+		return vim.fn.indent(lnum) ~= startIndent
+	end
+
+	local function findEdge(lnum, step)
+		while true do
+			local nextLnum = lnum + step
+			if nextLnum < 1 or nextLnum > lastLine then break end
+			if isBlockBoundary(nextLnum) then break end
+			lnum = nextLnum
+		end
+		return lnum
+	end
+
+	setLinewiseSelection(findEdge(curLnum, -1), findEdge(curLnum, 1))
+end
+
+--------------------------------------------------------------------------------
+
 ---Column Textobj (blockwise up and/or down until indent or shorter line)
 ---@param direction string "down" (default), "up", "both"
 function M.column(direction)
